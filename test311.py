@@ -9,12 +9,13 @@ SERVICE_ELEMENT_NAMES = ('service_code', 'metadata', 'type', 'keywords', 'group'
 ATTRIBUTE_ELEMENT_NAMES = ('variable', 'code', 'datatype', 'required', 'datatype_description', 'order', 'description', 'description')
 SERVICE_REQUEST_ELEMENT_NAMES = ('service_request_id', 'status', 'status_notes', 'service_name', 'service_code', 'description', 'agency_responsible', 'service_notice', 'requested_datetime', 'updated_datetime', 'expected_datetime', 'address', 'address_id', 'zipcode', 'lat', 'long', 'georss:point')
 JURISDICTION_ID = 'dc.gov'
-#URL_OPEN_311 = 'http://311.test.in.dc.gov/csr/Open311'
-URL_OPEN_311 = 'http://311.dc.gov/csr/Open311'
+URL_OPEN_311 = 'http://sandbox.georeport.dev/v2'
+#URL_OPEN_311 = 'http://311.dc.gov/csr/Open311'
 API_KEY = '7d7859704a'
 #JURISDICTION_ID = 'sfgov.org'
 #URL_OPEN_311 = 'https://open311.sfgov.org/dev/V2'
 #API_KEY = 'DT'
+
 
 def parseServices(dom):
 	services = []
@@ -25,13 +26,27 @@ def parseServices(dom):
 def parseService(serviceEl):
 	service = {}
 	for elName in SERVICE_ELEMENT_NAMES:
-		print elName
-		service[elName] = serviceEl.getElementsByTagName(elName)[0].childNodes[0].data
+		#print elName
+		elements = serviceEl.getElementsByTagName(elName)
+		if not elements:
+			continue
+		childnodes = elements[0].childNodes
+		if childnodes:
+			service[elName] = childnodes[0].data
+		#else:
+		#	service[elName] = None # or what? empty string?
+
 	return service
 
 def parseServiceDefinition(dom):
 	sd = {}
-	sdEl = dom.getElementsByTagName('service_definition')[0]
+	try:
+		sdEl = dom.getElementsByTagName('service_definition')[0]
+	except:
+		import pdb; pdb.set_trace()
+
+		raise ValueError('Could not parse service definition')
+		
 	sd['service_code'] = sdEl.getElementsByTagName('service_code')[0].childNodes[0].data
 	sd['attributes'] = []
 	for attrEl in sdEl.getElementsByTagName('attribute'):
@@ -64,42 +79,48 @@ def parseServiceRequest(srEl):
 	return sr
 
 def parseSubmitResult(dom):
+	# TODO: this doesn't do anything
 	result = {}
 	return result
-	
+
+class ErrorGettingXML(Exception):
+	pass
+
+def _getDom(opener, url, dumpfile):
+	result = opener.open(url)
+#	if result.code != 200:
+#		raise ErrorGettingXML("HTTP code %d while opening %r" % (result.code, url))
+	raw = result.read()
+	#print " Fetched %r, writing result to %s for debugging..." % (url, dumpfile)
+	f = open(dumpfile, 'w')
+	f.write(raw)
+	f.close()
+	dom = minidom.parse(dumpfile)
+	return dom
+
 def getServices(opener):
 	url = "%s/services.xml?%s" % (URL_OPEN_311, urllib.urlencode({'jurisdiction_id':JURISDICTION_ID}))
-	dom = minidom.parse(opener.open(url))
-	f = open('services.xml', 'w')
-	f.write(dom.toxml())
-	f.close()
+	print "\n Testing: %s" % (url)
+	dom = _getDom(opener, url, 'services.xml')
 	return parseServices(dom)
 
 def getServiceDefinition(opener, serviceCode):
-	url = "%s/service_definition.xml?%s" % (URL_OPEN_311, urllib.urlencode({'jurisdiction_id':JURISDICTION_ID, 'service_code':serviceCode}))
-	dom = minidom.parse(opener.open(url))
-	f = open('service_definition_%s.xml' % serviceCode, 'w')
-	f.write(dom.toxml())
-	f.close()
+	url = "%s/services/%s.xml?%s" % (URL_OPEN_311, serviceCode, urllib.urlencode({'jurisdiction_id':JURISDICTION_ID}))
+	print "\n Testing: %s" % (url)
+	dom = _getDom(opener, url, 'service_definition_%s.xml' % serviceCode)
 	return parseServiceDefinition(dom)
 
 def getServiceRequests(opener, serviceCode):
 	url = "%s/requests.xml?%s" % (URL_OPEN_311, urllib.urlencode({'jurisdiction_id':JURISDICTION_ID, 'service_code':serviceCode}))
-	dom = minidom.parse(opener.open(url))
-	f = open('requests_%s.xml' % serviceCode, 'w')
-	f.write(dom.toxml())
-	f.close()
+	print "\n Testing: %s" % (url)
+	dom = _getDom(opener, url, 'requests_%s.xml' % serviceCode)
 	return parseServiceRequests(dom)
 
 def submitServiceRequest(opener, serviceRequestDict):
 	serviceRequestDict.update({'jurisdiction_id':JURISDICTION_ID, 'api_key':API_KEY})
 	url = "%s/requests.xml" % (URL_OPEN_311)
-	data = opener.open(url, urllib.urlencode(serviceRequestDict))
-	dom = minidom.parse(data)
-	print 'CODE: %s' % data.getcode()
-	f = open('requests_submit.xml', 'w')
-	f.write(dom.toxml())
-	f.close()
+	print "\n Testing: %s" % (url)
+	dom = _getDom(opener, url, 'requests_submit.xml')
 	return parseSubmitResult(dom)
 
 class TestOpen311(unittest.TestCase):
@@ -161,7 +182,7 @@ class TestOpen311(unittest.TestCase):
 			self.assertEqual(type(eval(lon)), types.FloatType, 'georss:point lon is not valid')
 	
 	def testSubmitServiceRequest(self):
-		print submitServiceRequest(self.opener, {'service_code':'DMV66'}).read()
+		print submitServiceRequest(self.opener, {'service_code':'DMV66'})
 		
 if __name__ == '__main__':
 	suite = unittest.TestLoader().loadTestsFromTestCase(TestOpen311)
